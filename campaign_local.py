@@ -26,34 +26,41 @@ if uploaded_file:
                 axis=1
             )
 
-        # Step 4: Aggregate
+        # ✅ Step 4: Row-level Direct Revenue Calculation
+        df["Total Units Sold"] = df["Direct Units Sold"] + df["Indirect Units Sold"]
+        df["Direct Revenue"] = df.apply(
+            lambda row: (row["Direct Units Sold"] / row["Total Units Sold"]) * row["Total Revenue (Rs.)"]
+            if row["Total Units Sold"] > 0 else 0, axis=1
+        )
+
+        # ✅ Step 5: Grouped Aggregation (after row-level direct revenue calc)
         agg_df = df.groupby("Sku Id").agg({
             "ADDSPEND": "sum",
             "Views": "sum",
             "Clicks": "sum",
             "Direct Units Sold": "sum",
             "Indirect Units Sold": "sum",
-            "Total Revenue (Rs.)": "sum"
+            "Total Revenue (Rs.)": "sum",
+            "Direct Revenue": "sum"
         }).reset_index()
 
-        # Step 5: Calculated Metrics
         agg_df["Total Units Sold"] = agg_df["Direct Units Sold"] + agg_df["Indirect Units Sold"]
         agg_df["CTR"] = (agg_df["Clicks"] / agg_df["Views"]).replace([float('inf'), -float('inf')], 0) * 100
         agg_df["Conversion Rate per SKU"] = agg_df["Total Units Sold"] / agg_df["Clicks"].replace(0, 1)
         agg_df["Conversion Rate Direct Adjusted"] = agg_df["Direct Units Sold"] / (
             agg_df["Clicks"] - agg_df["Indirect Units Sold"]).replace(0, 1)
-        agg_df["Direct Revenue"] = agg_df.apply(
-            lambda row: (row["Direct Units Sold"] / row["Total Units Sold"]) * row["Total Revenue (Rs.)"]
-            if row["Total Units Sold"] > 0 else 0, axis=1)
         agg_df["ROI_Direct"] = agg_df.apply(
-            lambda row: row["Direct Revenue"] / row["ADDSPEND"]
-            if row["ADDSPEND"] > 0 else 0, axis=1)
+            lambda row: row["Direct Revenue"] / row["ADDSPEND"] if row["ADDSPEND"] > 0 else 0,
+            axis=1
+        )
 
         # Step 6: Sidebar Filters
         st.sidebar.header("🔎 Filter Conditions")
         filter_clicks = st.sidebar.text_input("Clicks (e.g. > 100)")
         filter_ctr = st.sidebar.text_input("CTR (%) (e.g. >= 2.5)")
         filter_cr_direct = st.sidebar.text_input("Conversion Rate Direct Adjusted (%)")
+        filter_addspend = st.sidebar.text_input("ADDSPEND (e.g. > 5000)")
+        filter_revenue = st.sidebar.text_input("Total Revenue (Rs.) (e.g. >= 10000)")
 
         if "Date" in df.columns:
             unique_dates = sorted(df["Date"].dropna().astype(str).unique().tolist())
@@ -81,9 +88,12 @@ if uploaded_file:
         if filter_ctr:
             filtered_df = apply_condition(filtered_df, "CTR", filter_ctr)
         if filter_cr_direct:
-            # Since it's in %, convert to decimal before filtering
             filtered_df["Conversion Rate Direct Adjusted"] *= 100
             filtered_df = apply_condition(filtered_df, "Conversion Rate Direct Adjusted", filter_cr_direct)
+        if filter_addspend:
+            filtered_df = apply_condition(filtered_df, "ADDSPEND", filter_addspend)
+        if filter_revenue:
+            filtered_df = apply_condition(filtered_df, "Total Revenue (Rs.)", filter_revenue)
 
         if selected_skus:
             filtered_df = filtered_df[filtered_df["Sku Id"].isin(selected_skus)]
@@ -107,11 +117,11 @@ if uploaded_file:
         kpi3.metric("🎯 CTR Overall (%)", f"{ctr_overall:.2f}")
         kpi4.metric("📈 Conversion Rate Direct Unit", f"{cr_direct_adj:.2%}")
 
-        # Step 9: Format Percentage Columns
+        # Step 9: Format %
         filtered_df["Conversion Rate per SKU"] = (filtered_df["Conversion Rate per SKU"] * 100).round(2)
         filtered_df["Conversion Rate Direct Adjusted"] = (filtered_df["Conversion Rate Direct Adjusted"]).round(2)
 
-        # Step 10: Table Output
+        # Step 10: Table
         st.subheader("📋 Aggregated Campaign Table")
         selected_columns = [
             "Sku Id", "ADDSPEND", "CTR", "Conversion Rate per SKU",
@@ -140,7 +150,7 @@ if uploaded_file:
         else:
             st.info("No data available for ROI chart.")
 
-        # Step 12: Clustered Bar Chart — AddSpend vs Revenue
+        # Step 12: AddSpend vs Direct Revenue
         st.subheader("💸 AddSpend vs Direct Revenue (Top 10 by AddSpend)")
         top_spend_df = filtered_df[filtered_df["Direct Units Sold"] > 0].sort_values(by="ADDSPEND", ascending=False).head(10)
 
@@ -163,6 +173,3 @@ if uploaded_file:
 
     except Exception as e:
         st.error(f"❌ Error: {str(e)}")
-     
-     
-      
